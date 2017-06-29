@@ -8,7 +8,7 @@ node-openjtalk : Node.js TTS module using OpenJTalk
 動作環境
 --------------
 * Mac OS X 10.10.1
-* Node.js v0.10.36
+* Node.js v6.0
 
 インストール
 --------------
