@@ -1,4 +1,4 @@
-const exec = require('child_process').exec;
+const spawn = require('child_process').spawn;
 const path = require('path');
 const uuid = require('uuid-v4');
 
@@ -17,12 +17,26 @@ class OpenJTalk {
     for (let key in options) {
       this[key] = options[key];
     }
+
+    switch (process.platform) {
+      case 'darwin' : this.player = 'afplay'; break;
+      case 'linux'  : this.player = 'aplay';  break;
+      default       : this.player = 'play';   break;
+    }
   }
 
+  /**
+   * 文字列を再生する
+   * @param {string} str
+   * @param {number|Function} [pitch|callback]
+   * @param {Function} [callback]
+   * @return {Function}
+   */
   talk(str /*, [pitch, [callback]] */) {
     // 引数の展開
     let pitch    = this.pitch;
     let callback = null;
+    let childProcess = null;
 
     if (typeof(arguments[1]) === 'number') {
       pitch = arguments[1];
@@ -33,37 +47,58 @@ class OpenJTalk {
         break;
       }
     }
-    this._makeWav(str, pitch, (err, result) => {
-      if (err) {
-        callback && callback(err, null);
+    childProcess = this._makeWav(str, pitch, (wavFileName, code) => {
+      if (code !== 0) {
         return;
       }
-      this._play(result.wav, callback);
+      childProcess = this._play(wavFileName, callback);
     });
+
+    return function getChildProcess() {
+      return childProcess;
+    }
   }
 
-  // wav を再生する
+  /**
+   * wav を再生する
+   * @param {string} wavFileName
+   * @param {Function} callback
+   * @return {ChildProcess}
+   */
   _play(wavFileName, callback) {
     // escape
     wavFileName = wavFileName.split(/\s/).join('');
 
-    let player;
-    switch (process.platform) {
-      case 'darwin' : player = 'afplay'; break;
-      case 'linux'  : player = 'aplay';  break;
-      default       : player = 'play';   break;
-    }
-    const cmd = `${player} ${wavFileName}&& rm ${wavFileName}`;
-    exec(cmd, (err, stdout, stderr) => {
-      callback && callback(err, stdout, stderr);
+    const playerProcess = spawn(this.player, [wavFileName]);
+
+    playerProcess.stdout.on('data', data => {
+      console.log(`${this.player} stdout: ${data}`);
     });
+
+    playerProcess.stderr.on('data', data => {
+      console.log(`${this.player} stderr: ${data}`);
+    });
+
+    playerProcess.on('close', code => {
+      spawn('rm', [wavFileName]);
+      callback && callback(code);
+    });
+
+    return playerProcess;
   }
 
-  // exec から open_jtalk を実行して wav ファイルを作る
+  /**
+   * spawn から open_jtalk を実行して wav ファイルを作る
+   * @param {string} str
+   * @param {number} pitch
+   * @param {Function} callback
+   * @return {ChildProcess}
+   */
   _makeWav(str, pitch, callback) {
     const wavFileName =  `${uuid()}.wav`;
 
-    let ojtCmd = this.openjtalk_bin;
+    const ojtCmd = this.openjtalk_bin;
+    const ojtCmdOptions = [];
     const options = {
       m  : this.htsvoice,
       x  : this.dic_dir,
@@ -80,19 +115,46 @@ class OpenJTalk {
     for (let option in options) {
       const value = options[option];
       if (value) {
-        ojtCmd += ` -${option} ${value}`;
+        ojtCmdOptions.push(`-${option}`);
+        ojtCmdOptions.push(value);
       }
     }
 
-    const cmd = `echo "${str}" | ${ojtCmd}`;
-    exec(cmd, (err, stdout, stderr) => {
-      const result = {
-        stdout : stdout,
-        stderr : stderr,
-        wav    : wavFileName
-      };
-      callback && callback(err, result);
+    const echoProcess = spawn('echo', [str]);
+    const openjtalkProcess = spawn(ojtCmd, ojtCmdOptions);
+
+    echoProcess.stdout.on('data', data => {
+      openjtalkProcess.stdin.write(data);
     });
+
+    echoProcess.stderr.on('data', data => {
+      console.log(`echo stderr: ${data}`);
+    });
+
+    echoProcess.on('close', code => {
+      if (code !== 0) {
+        console.log(`echo process exited with code ${code}`);
+      }
+      openjtalkProcess.stdin.end();
+    });
+
+    openjtalkProcess.stdout.on('data', data => {
+      console.log(`openjtalk stdout: ${data}`);
+    });
+
+    openjtalkProcess.stderr.on('data', data => {
+      console.log(`openjtalk stderr: ${data}`);
+    });
+
+    openjtalkProcess.on('close', code => {
+      if (code !== 0) {
+        spawn('rm', [wavFileName]);
+        console.log(`openjtalk process exited with code ${code}`);
+      }
+      callback && callback(wavFileName, code);
+    });
+
+    return openjtalkProcess;
   }
 }
 
