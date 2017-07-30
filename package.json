@@ -1,6 +1,6 @@
 {
 	"name"            : "openjtalk",
-	"version"         : "2.1",
+	"version"         : "2.1.0",
 	"description"     : "TTS using OpenJTalk",
 	"main"            : "openjtalk.js",
 	"dependencies"    : {
