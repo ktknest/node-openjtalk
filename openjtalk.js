@@ -32,7 +32,7 @@ class OpenJTalk {
    * @param {string} str
    * @param {number|Function} [pitch|callback]
    * @param {Function} [callback]
-   * @return {Function}
+   * @return {Function} killTalk
    */
   talk(str /*, [pitch, [callback]] */) {
     // 引数の展開
@@ -62,9 +62,74 @@ class OpenJTalk {
       });
     }
 
-    return function getChildProcess() {
-      return childProcess;
+    return function killTalk() {
+      childProcess && childProcess.kill();
+    };
+  }
+
+  /**
+   * 複数の文字列を再生する
+   * @param {string[]} list
+   * @param {number|Function} [pitch|callback]
+   * @param {Function} [callback]
+   * @return {Function} killTalkList
+   */
+  talkList(list /*, [pitch, [callback]] */) {
+    // 引数の展開
+    let pitch    = this.pitch;
+    let callback = null;
+    let childProcess = null;
+
+    if (typeof(arguments[1]) === 'number') {
+      pitch = arguments[1];
     }
+    for (let i = 1; i <= 2; ++i) {
+      if (typeof(arguments[i]) === 'function') {
+        callback = arguments[i];
+        break;
+      }
+    }
+
+    let makeProcess = null;
+    let playProcess = null;
+
+    const playList = [...list];
+
+    const makePromise = list.reduce((prev, str) => {
+      const next = new Promise((resolve, reject) => {
+        makeProcess = this._makeWav(str, this.pitch, (code) => {
+          if (!playProcess && playList.indexOf(str) === 0) {
+            play(str);
+          }
+
+          resolve();
+        });
+      });
+      return prev.then(next);
+    }, Promise.resolve(100));
+
+    const play = (str => {
+      playProcess = this._play(str, () => {
+        playList.shift(0);
+        if (playList.length === 0) {
+          callback && callback();
+          return;
+        }
+
+        const nextStr = playList[0];
+        if (this.data[nextStr]) {
+          play(nextStr);
+        } else {
+          playProcess = null;
+        }
+      });
+    }).bind(this);
+
+    return function killTalkList() {
+      playList.splice(0);
+      makeProcess && makeProcess.kill();
+      playProcess && playProcess.kill();
+    };
   }
 
   /**
