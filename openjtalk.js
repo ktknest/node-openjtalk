@@ -10,6 +10,8 @@ const DefaultOptions = {
 
 class OpenJTalk {
   constructor(args = {}) {
+    this.data = {};
+
     const options = DefaultOptions;
     for (let key in args) {
       options[key] = args[key];
@@ -47,12 +49,18 @@ class OpenJTalk {
         break;
       }
     }
-    childProcess = this._makeWav(str, pitch, (wavFileName, code) => {
-      if (code !== 0) {
-        return;
-      }
-      childProcess = this._play(wavFileName, callback);
-    });
+
+    if (this.data[str]) {
+      childProcess = this._play(str, callback);
+
+    } else {
+      childProcess = this._makeWav(str, pitch, (code) => {
+        if (code !== 0) {
+          return;
+        }
+        childProcess = this._play(str, callback);
+      });
+    }
 
     return function getChildProcess() {
       return childProcess;
@@ -60,14 +68,30 @@ class OpenJTalk {
   }
 
   /**
+   * wavファイルを削除
+   */
+  remove(str) {
+    if (this.data[str]) {
+      spawn('rm', [this.data[str]]);
+      delete this.data[str];
+    }
+  }
+
+  /**
+   * wavファイルを全て削除
+   */
+  removeAll() {
+    Object.keys(this.data).forEach(str => this.remove(str));
+  }
+
+  /**
    * wav を再生する
-   * @param {string} wavFileName
+   * @param {string} str
    * @param {Function} callback
    * @return {ChildProcess}
    */
-  _play(wavFileName, callback) {
-    // escape
-    wavFileName = wavFileName.split(/\s/).join('');
+  _play(str, callback) {
+    const wavFileName = this.data[str].split(/\s/).join('');
 
     const playerProcess = spawn(this.player, [wavFileName]);
 
@@ -80,7 +104,6 @@ class OpenJTalk {
     });
 
     playerProcess.on('close', code => {
-      spawn('rm', [wavFileName]);
       callback && callback(code);
     });
 
@@ -150,8 +173,10 @@ class OpenJTalk {
       if (code !== 0) {
         spawn('rm', [wavFileName]);
         console.log(`openjtalk process exited with code ${code}`);
+      } else {
+        this.data[str] = wavFileName;
       }
-      callback && callback(wavFileName, code);
+      callback && callback(code);
     });
 
     return openjtalkProcess;
